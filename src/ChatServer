@@ -1,0 +1,129 @@
+import java.io.*;
+
+import java.net.*;
+
+import java.util.concurrent.*;
+
+public class ChatServer {
+
+    private static final int PORT = 1234;
+
+    // Stores all connected clients with their username
+    //key : username
+    //value: client's handler(to send msg directly)
+    private static ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
+
+    // Thread pool for handling clients
+    private static ExecutorService pool = Executors.newFixedThreadPool(20);
+
+    public static void main(String[] args) {
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            System.out.println("Chat Server started on port " + PORT);
+            while (true) {
+                Socket socket = serverSocket.accept();
+                pool.execute(new ClientHandler(socket));
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Broadcast message to all clients except sender
+
+    public static void broadcastMessage(String message, ClientHandler sender) {
+        System.out.println("Message : " + message);
+        System.out.println("sender : " + sender);
+        clients.values().stream()
+                .filter(client -> client != sender)
+                .forEach(client -> client.sendMessage(message));
+    }
+
+    // Send private message
+
+    public static void privateMessage(String receiver, String message, String sender) {
+        System.out.println("Message : " + message);
+        System.out.println("receiver : " + receiver);
+        System.out.println("sender : " + sender);
+        ClientHandler client = clients.get(receiver);
+        if (client != null) {
+            client.sendMessage("[Private from " + sender + "]: " + message);
+        }
+    }
+
+    // Add new client
+
+    public static void addClient(String username, ClientHandler clientHandler) {
+        System.out.println("username : " + username);
+        System.out.println("clientHandler : " + clientHandler);
+        clients.put(username, clientHandler);
+        System.out.println(username + " joined the chat.");
+    }
+
+    // Remove disconnected client
+
+    public static void removeClient(String username) {
+        System.out.println("username : " + username);
+        clients.remove(username);
+        System.out.println(username + " left the chat.");
+    }
+}
+
+class ClientHandler implements Runnable {
+    private Socket socket;
+    private PrintWriter out;
+    private BufferedReader in;
+    private String username;
+
+    //Constructor 
+    public ClientHandler(Socket socket) {
+        this.socket = socket;
+    }
+
+    public void run() {
+        try {
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            out = new PrintWriter(socket.getOutputStream(), true);
+
+            // Ask for username
+            out.println("Enter your username: ");
+            username = in.readLine();
+            ChatServer.addClient(username, this);
+            ChatServer.broadcastMessage(username + " has joined the chat!", this);
+            String message;
+            while ((message = in.readLine()) != null) {
+                if (message.startsWith("/msg ")) {
+
+                    // Private message: /msg user Hello
+
+                    String[] tokens = message.split(" ", 3);
+                    if (tokens.length == 3) {
+                        String receiver = tokens[1];
+                        String privateMsg = tokens[2];
+                        ChatServer.privateMessage(receiver, privateMsg, username);
+                    } else {
+                        out.println("Invalid format. Use: /msg <user> <message>");
+                    }
+
+                } else {
+                    // Broadcast
+                    System.out.println(username + ": " + message);
+                    ChatServer.broadcastMessage(username + ": " + message, this);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            try { socket.close(); } catch (IOException e) { e.printStackTrace(); }
+            ChatServer.removeClient(username);
+            ChatServer.broadcastMessage(username + " has left the chat.", this);
+        }
+
+    }
+
+    public void sendMessage(String message) {
+        out.println(message);
+    }
+
+}
+
+ 
